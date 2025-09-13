@@ -1,0 +1,66 @@
+name: Image Downloader
+
+on:
+  workflow_dispatch:
+
+jobs:
+  download-images:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run image downloader
+        run: |
+          python << 'EOF'
+          import os, requests, json, urllib.parse, zipfile
+
+          GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+          SEARCH_ENGINE_ID = os.getenv("SEARCH_ENGINE_ID")
+
+          with open("titles.txt") as f:
+              titles = [line.strip() for line in f if line.strip()]
+
+          os.makedirs("images", exist_ok=True)
+
+          for title in titles:
+              query = urllib.parse.quote(title)
+              url = f"https://www.googleapis.com/customsearch/v1?q={query}&cx={SEARCH_ENGINE_ID}&key={GOOGLE_API_KEY}&searchType=image&num=2"
+              response = requests.get(url).json()
+
+              if "items" not in response:
+                  print(f"No images found for {title}")
+                  continue
+
+              for idx, item in enumerate(response["items"], start=1):
+                  img_url = item["link"]
+                  try:
+                      img_data = requests.get(img_url, timeout=10).content
+                      safe_title = title.replace(" ", "_")[:50]
+                      filename = f"images/{safe_title}_{idx}.jpg"
+                      with open(filename, "wb") as f:
+                          f.write(img_data)
+                      print(f"Downloaded {filename}")
+                  except Exception as e:
+                      print(f"Failed {img_url}: {e}")
+
+          # Create zip
+          with zipfile.ZipFile("images.zip", "w") as zipf:
+              for root, _, files in os.walk("images"):
+                  for file in files:
+                      zipf.write(os.path.join(root, file))
+          EOF
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: images
+          path: images.zip
